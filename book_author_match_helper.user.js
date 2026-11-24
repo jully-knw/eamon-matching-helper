@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         SDB 책 저자 매칭 도우미
 // @namespace    jully.kim
-// @version      1.0.0
-// @description  표준 인물 : 책 저자 매칭 보조 - AI 순서, 다음 검색/교보문고 분할 팝업, 매칭+나머지 금칙, 되돌리기
+// @version      1.1.0
+// @description  표준 인물 : 책 저자 매칭 보조 - AI 순서, 다음 검색/교보문고 분할 팝업, 매칭+나머지 금칙, 전체 금칙, 되돌리기
 // @match        https://eamon-matching-op.daumtools.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
@@ -370,6 +370,27 @@
     renderPopup();
   }
 
+  // 불러온 후보 전체를 금칙으로 (이미 매칭된 후보는 그대로 둔다)
+  async function forbidAll(stdId) {
+    const g = rowsOf(stdId);
+    if (!g) return;
+    const before = g.rows.map((tr) => [candId(tr), curState(tr)]);
+    const label = `${g.id} ${g.name}`;
+    toast(`${label}: 처리 중...`);
+    let n = 0, kept = 0;
+    for (const tr of g.rows) {
+      const st = curState(tr);
+      if (st === 'A') { kept++; continue; }
+      if (st !== 'D') { await setState(tr, 'D'); n++; }
+    }
+    const hasMore = !!findMoreButton(rowsOf(stdId) || g);
+    toast(`${label}: ${n}명 금칙` + (kept ? `, 매칭 ${kept}명은 그대로` : '') + (hasMore ? ' (더보기 안 한 후보는 그대로)' : ''), async () => {
+      for (const [id, st] of before) { const tr = findTr(stdId, id); if (tr) await setState(tr, st); }
+      toast(`${label}: 원래 상태로 복구`);
+    });
+    renderPopup();
+  }
+
   /* ================= 화면: 버튼/칩 주입 ================= */
   function css() {
     if (document.getElementById('mh-style')) return;
@@ -412,6 +433,16 @@
           b.addEventListener('click', (e) => { e.stopPropagation(); startAI(g.id); });
           wrap.appendChild(b);
           g.srcTd.querySelector('.source-id-text').insertAdjacentElement('afterend', wrap);
+        }
+        const wrapEl = g.srcTd.querySelector('.mh-ai-wrap');
+        if (wrapEl && !wrapEl.querySelector('.mh-all-btn')) {
+          const fb = document.createElement('button');
+          fb.type = 'button';
+          fb.className = 'mh-btn sub mh-all-btn';
+          fb.style.cssText = 'margin-left:4px;margin-top:4px';
+          fb.textContent = '전체 금칙';
+          fb.addEventListener('click', (e) => { e.stopPropagation(); forbidAll(g.id); });
+          wrapEl.appendChild(fb);
         }
         const label = s.busy ? '판정 중…' : s.judged ? 'AI 순서 다시 보기' : 'AI순으로 보기';
         if (b.textContent !== label) b.textContent = label;
@@ -547,7 +578,8 @@
     document.getElementById('mh-info').innerHTML = info || '목록에서 후보를 선택하세요.';
 
     const act = document.getElementById('mh-act');
-    act.innerHTML = '<button class="mh-btn" id="mh-match">★ 매칭 + 나머지 금칙</button><button class="mh-btn sub" id="mh-skip">대기로 두고 다음</button>';
+    act.innerHTML = '<button class="mh-btn" id="mh-match">★ 매칭 + 나머지 금칙</button><button class="mh-btn sub" id="mh-skip">대기로 두고 다음</button><button class="mh-btn sub" id="mh-allD" style="margin-left:auto">전체 금칙</button>';
+    act.querySelector('#mh-allD').addEventListener('click', () => forbidAll(stdId));
     act.querySelector('#mh-match').addEventListener('click', () => { if (ui.selId) matchOne(stdId, ui.selId); });
     act.querySelector('#mh-skip').addEventListener('click', () => {
       const i = list.findIndex((x) => x.id === ui.selId);
@@ -586,5 +618,5 @@
   run();
 
   // 테스트용 노출 (실사용에는 영향 없음)
-  if (typeof window !== 'undefined') window.__mh = { getGroups, startAI, nextPage, matchOne, ui, ST, CACHE, localCompare, usageText };
+  if (typeof window !== 'undefined') window.__mh = { getGroups, startAI, nextPage, matchOne, forbidAll, ui, ST, CACHE, localCompare, usageText };
 })();
