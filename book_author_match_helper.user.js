@@ -399,6 +399,7 @@
     s.textContent =
       '.mh-chip{display:inline-block;padding:0 7px;margin-right:4px;border-radius:9px;font-size:11px;line-height:18px}' +
       '.mh-btn{padding:3px 9px;border:0;border-radius:4px;background:#0F6E56;color:#fff;font-size:12px;cursor:pointer;white-space:nowrap}' +
+      '.mh-ai-btn{background:#C0392B}' +
       '.mh-btn.sub{background:#eee;color:#333}.mh-btn:disabled{opacity:.5;cursor:default}' +
       '.mh-name{border-bottom:1px dashed #888;cursor:pointer}' +
       '#mh-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:99998;display:none;align-items:center;justify-content:center}' +
