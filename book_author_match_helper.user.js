@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SDB 책 저자 매칭 도우미
 // @namespace    jully.kim
-// @version      1.1.0
+// @version      1.2.0
 // @description  표준 인물 : 책 저자 매칭 보조 - AI 순서, 다음 검색/교보문고 분할 팝업, 매칭+나머지 금칙, 전체 금칙, 되돌리기
 // @match        https://eamon-matching-op.daumtools.com/*
 // @grant        GM_xmlhttpRequest
@@ -26,6 +26,8 @@
     LIMIT_PRIMARY: 500,     // 주 모델 하루 요청 한도 (표시용)
     MAX_FIELD_CHARS: 400,   // AI에 보내는 저자정보/저서 최대 글자 수
     CACHE_DAYS: 14,
+    FORBID_MESSAGE: '동일인물 아님',  // 금칙 사유 창에 자동으로 입력할 메시지 (매칭 사유 창은 직접 작성)
+    MANUAL_WAIT_MS: 600000,          // 직접 작성하는 창을 기다리는 최대 시간(10분)
   };
 
   const VERDICT = {
@@ -343,29 +345,73 @@
   }
 
   /* ================= 매칭 + 나머지 금칙 ================= */
+  // 열려 있는 운영툴 팝업(Vuetify dialog)
+  const activeDialog = () => document.querySelector('.v-dialog__content--active') || document.querySelector('.v-dialog--active');
+
+  // 버튼을 눌렀을 때 뜨는 팝업 처리
+  //  - 금칙 사유 창: 메시지를 자동 입력하고 [등록]
+  //  - 그 밖의 창(매칭 사유 등): 사용자가 직접 작성하고 닫을 때까지 기다림. 취소하면 중단
+  async function handleModal(tr, val) {
+    const dlg = await waitFor(activeDialog, val === 'D' ? 2000 : 1200);
+    if (!dlg) { await sleep(CFG.CLICK_DELAY_MS); return; }
+    const title = txt(dlg);
+    if (val === 'D' && /금칙 사유/.test(title)) {
+      const ta = Array.from(dlg.querySelectorAll('textarea')).find((t) => !t.readOnly && !t.disabled);
+      if (!ta) throw new Error('금칙 사유 창에서 메시지 입력란을 찾지 못했어요');
+      ta.focus();
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value');
+      if (setter && setter.set) setter.set.call(ta, CFG.FORBID_MESSAGE); else ta.value = CFG.FORBID_MESSAGE;
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+      await sleep(150);
+      const ok = Array.from(dlg.querySelectorAll('button')).find((b) => txt(b) === '등록');
+      if (!ok) throw new Error('금칙 사유 창에서 [등록] 버튼을 찾지 못했어요');
+      ok.click();
+      const closed = await waitFor(() => !activeDialog(), 5000, 100);
+      if (!closed) throw new Error('금칙 사유 창이 닫히지 않았어요 (등록이 안 됐을 수 있어요)');
+      await sleep(CFG.CLICK_DELAY_MS);
+      return;
+    }
+    // 직접 작성하는 창
+    toast('열린 창에 직접 작성하고 [등록]을 눌러 주세요 (취소하면 여기서 멈춰요)');
+    const done = await waitFor(() => !activeDialog(), CFG.MANUAL_WAIT_MS, 200);
+    if (!done) throw new Error('창이 오래 열려 있어 멈췄어요');
+    await sleep(CFG.CLICK_DELAY_MS);
+    if (curState(tr) !== val) throw new Error('창에서 취소해서 멈췄어요');
+  }
+
   async function setState(tr, val) {
     const b = toggleBtns(tr)[val];
     if (!b || curState(tr) === val) return;
     b.click();
-    await sleep(CFG.CLICK_DELAY_MS);
+    await handleModal(tr, val);
   }
+  // 여러 후보를 순서대로 처리. 오류가 나거나 취소하면 거기서 멈추고 알림
+  async function applyStates(stdId, pairs, label) {
+    try {
+      for (const [id, st] of pairs) { const tr = findTr(stdId, id); if (tr) await setState(tr, st); }
+      return true;
+    } catch (e) {
+      toast(`${label}: 중단됨 - ${e.message}`);
+      return false;
+    }
+  }
+
   async function matchOne(stdId, chosenId) {
     const g = rowsOf(stdId);
     if (!g) return;
     const before = g.rows.map((tr) => [candId(tr), curState(tr)]);
     const label = `${g.id} ${g.name}`;
     toast(`${label}: 처리 중...`);
-    let n = 0;
-    const chosen = g.rows.find((tr) => candId(tr) === chosenId);
-    if (chosen) await setState(chosen, 'A');
-    for (const tr of g.rows) {
-      if (candId(tr) === chosenId) continue;
-      if (curState(tr) !== 'D') { await setState(tr, 'D'); n++; }
+    // 1) 매칭 (매칭 사유는 직접 작성) 2) 나머지 금칙 (사유 자동)
+    if (!(await applyStates(stdId, [[chosenId, 'A']], label))) return;
+    const todo = [];
+    for (const tr of (rowsOf(stdId) || g).rows) {
+      if (candId(tr) !== chosenId && curState(tr) !== 'D') todo.push([candId(tr), 'D']);
     }
+    if (!(await applyStates(stdId, todo, label))) return;
     const hasMore = !!findMoreButton(rowsOf(stdId) || g);
-    toast(`${label}: 1명 매칭, ${n}명 금칙` + (hasMore ? ' (더보기 안 한 후보는 그대로)' : ''), async () => {
-      for (const [id, st] of before) { const tr = findTr(stdId, id); if (tr) await setState(tr, st); }
-      toast(`${label}: 원래 상태로 복구`);
+    toast(`${label}: 1명 매칭, ${todo.length}명 금칙` + (hasMore ? ' (더보기 안 한 후보는 그대로)' : ''), async () => {
+      if (await applyStates(stdId, before, label)) toast(`${label}: 원래 상태로 복구`);
     });
     renderPopup();
   }
@@ -377,16 +423,17 @@
     const before = g.rows.map((tr) => [candId(tr), curState(tr)]);
     const label = `${g.id} ${g.name}`;
     toast(`${label}: 처리 중...`);
-    let n = 0, kept = 0;
+    const todo = [];
+    let kept = 0;
     for (const tr of g.rows) {
       const st = curState(tr);
       if (st === 'A') { kept++; continue; }
-      if (st !== 'D') { await setState(tr, 'D'); n++; }
+      if (st !== 'D') todo.push([candId(tr), 'D']);
     }
+    if (!(await applyStates(stdId, todo, label))) return;
     const hasMore = !!findMoreButton(rowsOf(stdId) || g);
-    toast(`${label}: ${n}명 금칙` + (kept ? `, 매칭 ${kept}명은 그대로` : '') + (hasMore ? ' (더보기 안 한 후보는 그대로)' : ''), async () => {
-      for (const [id, st] of before) { const tr = findTr(stdId, id); if (tr) await setState(tr, st); }
-      toast(`${label}: 원래 상태로 복구`);
+    toast(`${label}: ${todo.length}명 금칙` + (kept ? `, 매칭 ${kept}명은 그대로` : '') + (hasMore ? ' (더보기 안 한 후보는 그대로)' : ''), async () => {
+      if (await applyStates(stdId, before, label)) toast(`${label}: 원래 상태로 복구`);
     });
     renderPopup();
   }
@@ -402,7 +449,7 @@
       '.mh-ai-btn{background:#C0392B}' +
       '.mh-btn.sub{background:#eee;color:#333}.mh-btn:disabled{opacity:.5;cursor:default}' +
       '.mh-name{border-bottom:1px dashed #888;cursor:pointer}' +
-      '#mh-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:99998;display:none;align-items:center;justify-content:center}' +
+      '#mh-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;display:none;align-items:center;justify-content:center}' +
       '#mh-panel{width:92vw;height:88vh;background:#fff;border-radius:10px;display:flex;flex-direction:column;overflow:hidden;font-size:13px;color:#222}' +
       '#mh-panel .hd{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid #ddd}' +
       '#mh-panel .bd{flex:1;display:flex;min-height:0}' +
