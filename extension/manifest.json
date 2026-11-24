@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "SDB 매칭 도우미 - 다음 검색 프레임 허용",
+  "version": "1.0.0",
+  "description": "운영툴(eamon-matching-op) 안에서만 다음(daum.net) 페이지를 팝업 프레임으로 볼 수 있게 허용합니다. 다른 기능 없음.",
+  "permissions": ["declarativeNetRequest"],
+  "host_permissions": ["https://search.daum.net/*"],
+  "declarative_net_request": {
+    "rule_resources": [
+      { "id": "allow_daum_frame", "enabled": true, "path": "rules.json" }
+    ]
+  }
+}
