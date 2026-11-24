@@ -8,21 +8,12 @@
 | `extension/` | 운영툴 안에서 `search.daum.net` 프레임 허용 (규칙 1개) | 거의 안 바꿈 |
 | `book_author_match_helper.user.js` | 모든 기능 (템퍼몽키) | GitHub에 올리면 자동 업데이트 |
 
-## 1. Apps Script 중계 (기존 Gemini.gs 사용)
-1. 기존 프로젝트에 `apps_script/ProxyEndpoint.gs`를 새 파일로 추가 (기존에 `doGet`/`doPost`가 있으면 이름이 겹치니 확인)
-2. `Gemini.gs` 수정 2곳
-   - `return json;` 바로 위에 `json._model = model;` 추가
-   - 429 처리 줄을 아래로 교체
-     ```
-     if (code === 403 || status === 'PERMISSION_DENIED') break;   // 다음 키
-     continue;                                                       // 429 포함: 다음 모델
-     ```
-3. 스크립트 속성 추가
-   - `PROXY_TOKEN` : 임의의 긴 문자열 (템퍼몽키와 같은 값)
-   - `GEMINI_MODELS` : `gemini-3.1-flash-lite,gemini-3.5-flash-lite`
-4. 배포 > 배포 관리 > 편집 > 새 버전으로 배포 (주소 유지)
-5. 브라우저에서 `/exec` 주소를 열어 `{"ok":true,"msg":"gemini proxy alive"}` 확인
-   (실제 키/토큰은 저장소에 올리지 마세요. 스크립트 속성에만 둡니다.)
+## 1. Apps Script 중계 (contentdb-gas 저장소)
+코드는 https://github.com/jully-knw/contentdb-gas 의 `Gemini.js`(수정)와 `MatchingProxy.js`(신규)에 있어요 (PR #12).
+1. PR 병합 후 `clasp push`
+2. 스크립트 속성에 `PROXY_TOKEN` 추가 (임의의 긴 문자열, 템퍼몽키 설정과 같은 값). `GEMINI_MODELS`는 바꾸지 않아요.
+3. 배포 > 배포 관리 > 편집 > 새 버전으로 배포 (기존 `/exec` 주소 유지)
+4. 키와 토큰은 저장소에 올리지 말고 스크립트 속성에만 둬요.
 
 ## 2. 확장프로그램 (한 번만)
 1. 크롬 `chrome://extensions` > 개발자 모드 켜기 > "압축해제된 확장 프로그램을 로드합니다" > `extension` 폴더 선택
